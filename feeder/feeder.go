@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cmu440-F15/paxosapp/libstore"
-	"github.com/cmu440-F15/readkey/util"
+	"github.com/edfward/readkey/libstore"
+	"github.com/edfward/readkey/util"
 	rss "github.com/jteeuwen/go-pkg-rss"
 )
 

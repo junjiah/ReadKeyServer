@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"log"
 
-	"github.com/cmu440-F15/paxosapp/libstore"
-	"github.com/cmu440-F15/readkey/feeder"
-	"github.com/cmu440-F15/readkey/util"
+	"github.com/edfward/readkey/feeder"
+	"github.com/edfward/readkey/libstore"
+	"github.com/edfward/readkey/util"
 )
 
 // Global services.

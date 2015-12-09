@@ -6,35 +6,24 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"strings"
 
-	"github.com/cmu440-F15/paxosapp/libstore"
-	rapi "github.com/cmu440-F15/readkey/api"
-	"github.com/cmu440-F15/readkey/feeder"
-	"github.com/cmu440-F15/readkey/util"
+	rapi "github.com/edfward/readkey/api"
+	"github.com/edfward/readkey/feeder"
+	"github.com/edfward/readkey/libstore"
+	"github.com/edfward/readkey/util"
 	"github.com/gin-gonic/gin"
 )
 
 var (
-	paxosPorts            = flag.String("paxosPorts", "", "ports of all nodes")
-	paxosIds              = flag.String("paxosIds", "", "IDs of all nodes")
-	hostMap               = make(map[int]string)
 	keywordServerEndPoint = flag.String("keywordServerEndPoint", "4567/keywords", "end point of keyword server")
 )
 
 // Parse command line arguments and set up libstore and ReadKey feeder.
 func init() {
 	flag.Parse()
-	portList := strings.Split(*paxosPorts, ",")
-	idList := strings.Split(*paxosIds, ",")
-
-	for i, port := range portList {
-		id, _ := strconv.Atoi(idList[i])
-		hostMap[id] = "localhost:" + port
-	}
 
 	// Get libstore.
-	ls, err := libstore.NewLibstore(hostMap)
+	ls, err := libstore.NewLibstore()
 	if err != nil {
 		fmt.Println("Failed to start libstore, exit.....")
 		os.Exit(1)
