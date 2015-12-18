@@ -6,14 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/edfward/readkey/libstore"
-	"github.com/edfward/readkey/util"
+	"github.com/edfward/readkey/model/feed"
 	rss "github.com/jteeuwen/go-pkg-rss"
 )
 
 // Exported interfaces.
 type Feeder interface {
-	GetFeedSource(url string) (*util.FeedSource, error)
+	GetFeedSource(url string) (*feed.FeedSource, error)
 }
 
 // A struct for feed handlers to send URL-ID pair.
@@ -32,7 +31,6 @@ type feedSrcInfo struct {
 
 // Feed manager.
 type feeder struct {
-	ls libstore.Libstore
 	// Mapping from atom/rss URL to corresponding info.
 	urlToFeedSrc          map[string]*feedSrcInfo
 	urlToFeedSrcLock      *sync.RWMutex
@@ -41,10 +39,9 @@ type feeder struct {
 }
 
 // Build the feeder and start the background goroutine.
-func NewFeeder(ls libstore.Libstore, keywordServerEndPoint string) *feeder {
+func NewFeeder(keywordServerEndPoint string) *feeder {
 	newChannelNofityCh := make(chan channelInfo)
 	fd := &feeder{
-		ls:                    ls,
 		urlToFeedSrc:          make(map[string]*feedSrcInfo),
 		urlToFeedSrcLock:      &sync.RWMutex{},
 		newChannelNofityCh:    newChannelNofityCh,
@@ -73,7 +70,7 @@ func (f *feeder) run() {
 			}
 			f.urlToFeedSrcLock.Unlock()
 			c.doneCh <- struct{}{}
-			// TODO: Store to backend storage server using libstore IF NEW,
+			// TODO: Store to backend storage server IF NEW,
 			// because we need to track what sites are being listened, in case server failure
 			// we can re-establish the listening handlers.
 		}
@@ -81,11 +78,11 @@ func (f *feeder) run() {
 }
 
 // Requires the URL to exact match actual feed's URL.
-func (f *feeder) GetFeedSource(url string) (*util.FeedSource, error) {
+func (f *feeder) GetFeedSource(url string) (*feed.FeedSource, error) {
 	f.urlToFeedSrcLock.RLock()
 	if info, ok := f.urlToFeedSrc[url]; ok && info.id != "" {
 		f.urlToFeedSrcLock.RUnlock()
-		return &util.FeedSource{info.id, info.title}, nil
+		return &feed.FeedSource{info.id, info.title}, nil
 	}
 	f.urlToFeedSrcLock.RUnlock()
 
@@ -102,7 +99,7 @@ func (f *feeder) GetFeedSource(url string) (*util.FeedSource, error) {
 		f.urlToFeedSrcLock.RLock()
 		defer f.urlToFeedSrcLock.RUnlock()
 		if info, ok := f.urlToFeedSrc[url]; ok && info.id != "" {
-			return &util.FeedSource{info.id, info.title}, nil
+			return &feed.FeedSource{info.id, info.title}, nil
 		} else {
 			return nil, errors.New("reading ID error, feed URL may not match exactly, or parsing ID failed")
 		}
@@ -114,7 +111,7 @@ func (f *feeder) storeFeedSource(url string) <-chan bool {
 	readyCh := make(chan bool)
 	// TODO: Change timeout in production.
 	const timeout = 1
-	handler := newFeedHandler(f.ls, f.newChannelNofityCh, f.keywordServerEndPoint)
+	handler := newFeedHandler(f.newChannelNofityCh, f.keywordServerEndPoint)
 	feed := rss.NewWithHandlers(timeout, true, nil, handler)
 
 	go func() {

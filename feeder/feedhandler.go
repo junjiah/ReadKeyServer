@@ -1,19 +1,18 @@
 package feeder
 
 import (
-	"encoding/json"
 	"log"
 	"sync"
 	"time"
 
 	"github.com/edfward/readkey/keyword"
-	"github.com/edfward/readkey/libstore"
+	"github.com/edfward/readkey/model/feed"
+	"github.com/edfward/readkey/model/user"
 	"github.com/edfward/readkey/util"
 	rss "github.com/jteeuwen/go-pkg-rss"
 )
 
 type feedHandler struct {
-	ls                 libstore.Libstore
 	newChannelNofityCh chan<- channelInfo
 	// Keep previous `keepSeenItemNum` feed items.
 	seenItems       []string
@@ -23,9 +22,8 @@ type feedHandler struct {
 	kwFetcher keyword.KeywordFetcher
 }
 
-func newFeedHandler(ls libstore.Libstore, newChannelNofityCh chan<- channelInfo, keywordServerEndPoint string) *feedHandler {
+func newFeedHandler(newChannelNofityCh chan<- channelInfo, keywordServerEndPoint string) *feedHandler {
 	return &feedHandler{
-		ls:                 ls,
 		newChannelNofityCh: newChannelNofityCh,
 		seenItems:          nil,
 		keepSeenItemNum:    50, // Default value.
@@ -35,7 +33,7 @@ func newFeedHandler(ls libstore.Libstore, newChannelNofityCh chan<- channelInfo,
 	}
 }
 
-func (h *feedHandler) ProcessItems(feed *rss.Feed, ch *rss.Channel, items []*rss.Item) {
+func (h *feedHandler) ProcessItems(rssFeed *rss.Feed, ch *rss.Channel, items []*rss.Item) {
 	// Update capacity. ASSUME it's reasonable.
 	// TODO: May not be safe enough.
 	if len(items) > h.keepSeenItemNum {
@@ -46,22 +44,20 @@ func (h *feedHandler) ProcessItems(feed *rss.Feed, ch *rss.Channel, items []*rss
 	if h.channelId == "" {
 		if cid := getChannelId(ch); cid != "" {
 			doneCh := make(chan struct{})
-			h.newChannelNofityCh <- channelInfo{feed.Url, cid, ch.Title, doneCh}
+			h.newChannelNofityCh <- channelInfo{rssFeed.Url, cid, ch.Title, doneCh}
 			<-doneCh
 			h.channelId = cid
 		} else {
 			// TODO: Proper error handling. Currently simply ignore.
 			// The consequence is that: there is a goroutine listening to this channel,
 			// but user can never get its feed source ID.
-			log.Printf("[e] Processing channel %v failed\n", feed.Url)
+			log.Printf("[e] Processing channel %v failed\n", rssFeed.Url)
 			return
 		}
 	}
 
 	// Get subscribers of the current channel.
-	subKey := util.FormatSubscriberKey(h.channelId)
-	// TODO: Ignore errors for now.
-	subscribers, _ := h.ls.GetList(subKey)
+	subscribers := feed.GetFeedSourceSubscribers(h.channelId)
 
 	// Handle items.
 	var newitems []*rss.Item
@@ -76,16 +72,14 @@ func (h *feedHandler) ProcessItems(feed *rss.Feed, ch *rss.Channel, items []*rss
 		h.seenItems = h.seenItems[len(h.seenItems)-h.keepSeenItemNum:]
 	}
 
-	log.Printf("[i] Found %d new items(s) in %s\n", len(newitems), feed.Url)
+	log.Printf("[i] Found %d new items(s) in %s\n", len(newitems), rssFeed.Url)
 	var wg sync.WaitGroup
 	for _, item := range newitems {
 		if id := getItemId(item); id != "" {
 
 			// Append to subscribers' unread queue.
-			for _, user := range subscribers {
-				unreadKey := util.FormatUserUnreadKey(user, h.channelId)
-				// TODO: Error handling.
-				h.ls.AppendToList(unreadKey, id)
+			for _, username := range subscribers {
+				user.AppendUnreadFeedId(username, h.channelId, id)
 			}
 
 			// Store the actual content of the feed item.
@@ -94,20 +88,18 @@ func (h *feedHandler) ProcessItems(feed *rss.Feed, ch *rss.Channel, items []*rss
 			if len(item.Links) > 0 {
 				link = item.Links[0].Href
 			}
-			feedItem := &util.FeedItem{
+			feedItem := feed.FeedItem{
 				Link:    link,
 				Content: *contentPtr,
 			}
-			feedItemPacket, _ := json.Marshal(feedItem)
-			// TODO: Error handling.
-			h.ls.Put(id, string(feedItemPacket))
+			feed.SetFeed(id, feedItem)
 
 			// Append to its corresponding feed source by spawning a new goroutine.
 			lang := getLang(item, ch)
 			wg.Add(1)
 			go func(id, title, pubDate string) {
 				defer wg.Done()
-				entry := &util.FeedItemEntry{
+				entry := feed.FeedItemEntry{
 					FeedId:  id,
 					Title:   title,
 					PubDate: pubDate,
@@ -120,9 +112,7 @@ func (h *feedHandler) ProcessItems(feed *rss.Feed, ch *rss.Channel, items []*rss
 				// 1 second timeout.
 				case <-time.After(1 * time.Second):
 				}
-				entryPacket, _ := json.Marshal(entry)
-				// TODO: Error handling.
-				h.ls.AppendToList(h.channelId, string(entryPacket))
+				feed.AddFeedEntryToSource(h.channelId, entry)
 			}(id, item.Title, item.PubDate)
 		} else {
 			log.Printf("[e] Parsing item ID failed for %v\n", item)

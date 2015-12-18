@@ -2,34 +2,32 @@ package main
 
 import (
 	"flag"
-	"fmt"
-	"log"
-	"os"
 	"strconv"
 
-	rapi "github.com/edfward/readkey/api"
 	"github.com/edfward/readkey/feeder"
 	"github.com/edfward/readkey/libstore"
+	"github.com/edfward/readkey/model/feed"
+	"github.com/edfward/readkey/model/user"
 	"github.com/edfward/readkey/util"
 	"github.com/gin-gonic/gin"
 )
 
 var (
 	keywordServerEndPoint = flag.String("keywordServerEndPoint", "4567/keywords", "end point of keyword server")
+	redisServer           = flag.String("redisServer", ":6379", "")
+	fd                    feeder.Feeder
 )
 
 // Parse command line arguments and set up libstore and ReadKey feeder.
 func init() {
 	flag.Parse()
 
-	// Get libstore.
-	ls, err := libstore.NewLibstore()
-	if err != nil {
-		fmt.Println("Failed to start libstore, exit.....")
-		os.Exit(1)
-	}
-	fd := feeder.NewFeeder(ls, "http://localhost:"+*keywordServerEndPoint)
-	rapi.Setup(ls, fd)
+	// Init feeder.
+	fd = feeder.NewFeeder("http://localhost:" + *keywordServerEndPoint)
+	// Init the models and backend redis store.
+	rs := libstore.NewStore(*redisServer)
+	user.Setup(rs)
+	feed.Setup(rs)
 }
 
 func main() {
@@ -49,9 +47,8 @@ func main() {
 	// Get the list of subscribed feed sources, if successful return the list of format
 	// { subscriptions: [{ id, title }] }.
 	authorized.GET("subscription", func(c *gin.Context) {
-		user := c.MustGet(gin.AuthUserKey).(string)
-		// TODO: Ignore the error, since fetching error usually means empty subscriptions.
-		subs, _ := rapi.GetSubscribedFeedSources(user)
+		username := c.MustGet(gin.AuthUserKey).(string)
+		subs := user.GetFeedSubscriptions(username)
 		c.JSON(200, gin.H{"subscriptions": subs})
 	})
 
@@ -59,13 +56,18 @@ func main() {
 	// { id, title }.
 	authorized.POST("subscription", func(c *gin.Context) {
 		c.Writer.WriteHeader(400)
-		user := c.MustGet(gin.AuthUserKey).(string)
+		username := c.MustGet(gin.AuthUserKey).(string)
 		if subUrl := c.PostForm("url"); subUrl != "" {
-			if src, err := rapi.Subscribe(user, subUrl); err != nil {
-				log.Println(err)
-			} else {
-				c.JSON(201, src)
+			src, err := fd.GetFeedSource(subUrl)
+			if err != nil {
+				c.JSON(400, gin.H{"error": err.Error()})
+				return
 			}
+			feed.AddFeedSourceSubscriber(src.SourceId, username)
+			user.AppendFeedSubscription(username, *src)
+			// Init unread items for current user.
+			user.InitUserUnreadQueue(username, src.SourceId)
+			c.JSON(201, src)
 		}
 	})
 
@@ -73,53 +75,43 @@ func main() {
 	// { feeds: [{ id, title, summary }] }.
 	authorized.GET("subscription/*id", func(c *gin.Context) {
 		c.Writer.WriteHeader(400)
-		user := c.MustGet(gin.AuthUserKey).(string)
+		username := c.MustGet(gin.AuthUserKey).(string)
 		// TODO: Get unread parameter from request.
-		unreadOnly := true
+		// unreadOnly := true
 		if subId := c.Param("id"); subId != "/" {
 			// Off-by-one to ignore the first '/'.
 			subId = util.Escape(subId[1:])
-			if entries, err := rapi.GetFeedItemEntries(user, subId, unreadOnly); err != nil {
-				log.Println(err)
-				c.JSON(404, gin.H{"error": err.Error()})
-			} else {
-				c.JSON(200, gin.H{"feeds": entries})
-			}
+			unreadIds := user.GetUnreadFeedIds(username, subId)
+			entries := feed.GetFeedEntriesFromSource(subId, unreadIds)
+			c.JSON(200, gin.H{"feeds": entries})
 		}
 	})
 
 	// Mark a feed item as read.
 	authorized.PUT("subscription/*id", func(c *gin.Context) {
-		user := c.MustGet(gin.AuthUserKey).(string)
+		username := c.MustGet(gin.AuthUserKey).(string)
 		var form struct {
 			ItemId string `form:"itemId" binding:"required"`
 			Read   bool   `form:"read" binding:"required"`
 		}
 
 		if c.Bind(&form) == nil {
-			sourceId := util.Escape(c.Param("id")[1:])
-			itemId := util.Escape(form.ItemId)
-			// TODO: Returned `read` is not used.
-			_, err := rapi.MarkFeedItem(user, sourceId, itemId, form.Read)
-			if err != nil {
-				// No content.
-				c.Writer.WriteHeader(400)
-			} else {
-				c.Writer.WriteHeader(204)
-			}
+			srcId := util.Escape(c.Param("id")[1:])
+			feedId := util.Escape(form.ItemId)
+			user.RemoveUnreadFeedId(username, srcId, feedId)
+			c.Writer.WriteHeader(204)
 		}
 	})
 
 	// Fetch number of unread entries.
 	authorized.GET("unreadcount/*id", func(c *gin.Context) {
 		c.Writer.WriteHeader(400)
-		user := c.MustGet(gin.AuthUserKey).(string)
+		username := c.MustGet(gin.AuthUserKey).(string)
 		if subId := c.Param("id"); subId != "/" {
 			// Off-by-one to ignore the first '/'.
 			subId = util.Escape(subId[1:])
-			if unreadCnt, err := rapi.GetUnreadCount(user, subId); err == nil {
-				c.String(200, strconv.Itoa(unreadCnt))
-			}
+			cnt := user.GetUnreadFeedCount(username, subId)
+			c.String(200, strconv.FormatInt(cnt, 10))
 		}
 	})
 
@@ -129,12 +121,8 @@ func main() {
 		if feedId := c.Param("id"); feedId != "/" {
 			// Off-by-one to ignore the first '/'.
 			feedId = util.Escape(feedId[1:])
-			if item, err := rapi.GetFeedItem(feedId); err != nil {
-				log.Println(err)
-				c.JSON(404, gin.H{"error": err.Error()})
-			} else {
-				c.JSON(200, item)
-			}
+			item := feed.GetFeed(feedId)
+			c.JSON(200, item)
 		}
 	})
 

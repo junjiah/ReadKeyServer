@@ -11,18 +11,20 @@ func FormatFeedKey(feedId string) string {
 
 // Key for mapping from a user to his subscribed feed sources.
 func FormatUserSubsKey(user string) string {
-	return Escape("user-sub:" + user)
+	// TODO: Should be like 'user:1000:sub'.
+	return Escape("user:sub:" + user)
 }
 
-// Key for mapping from a user + a feed source to its unread feed item entries.
+// Key for mapping from a user + a feed source to its unread feed IDs.
 func FormatUserUnreadKey(user, feedSrcId string) string {
-	// TODO: Should not allow user to have names containing ':'.
-	return Escape("user-unread:" + user + ":" + feedSrcId)
+	// TODO: Should not allow user to have names containing ':',
+	// rather, it should be 'user:1000:src:xyt.com:unread'.
+	return Escape("user:unread:" + user + ":" + feedSrcId)
 }
 
 // Key for mapping from a feed source to its feed item entries.
-func FormatFeedSourceKey(feedSrcId string) string {
-	return Escape("src:" + feedSrcId)
+func FormatFeedSourceKey(rawFeedSrcId string) string {
+	return Escape("src:" + rawFeedSrcId)
 }
 
 // Key for mapping from a feed source to its subscribers / users.
