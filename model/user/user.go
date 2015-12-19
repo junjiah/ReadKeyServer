@@ -22,7 +22,7 @@ func GetFeedSubscriptions(user string) []feed.FeedSource {
 	defer c.Close()
 
 	userSubKey := util.FormatUserSubsKey(user)
-	srcs, err := redis.Strings(c.Do("LRANGE", userSubKey, 0, -1))
+	srcs, err := redis.Strings(c.Do("HVALS", userSubKey))
 	if err != nil {
 		// TODO: Detailed log & retry.
 		log.Printf("[e] Failed to get subscribed feed sources.\n")
@@ -45,10 +45,25 @@ func AppendFeedSubscription(user string, src feed.FeedSource) {
 
 	userSubKey := util.FormatUserSubsKey(user)
 	srcPacket, _ := json.Marshal(src)
-	if _, err := c.Do("RPUSH", userSubKey, srcPacket); err != nil {
+	if _, err := c.Do("HSET", userSubKey, src.SourceId, srcPacket); err != nil {
 		// TODO: Detailed log.
 		log.Printf("[e] Failed to append feed subscription to user.\n")
 	}
+}
+
+// Remove the subsribed feed source, return true if successful.
+func RemoveFeedSubscription(user, srcId string) bool {
+	c := rs.GetConnection()
+	defer c.Close()
+
+	userSubKey := util.FormatUserSubsKey(user)
+	deleted, err := redis.Int64(c.Do("HDEL", userSubKey, srcId))
+	if err != nil {
+		// TODO: Detailed log & retry.
+		log.Printf("[e] Failed to remove subscription.\n")
+		return false
+	}
+	return deleted == 1
 }
 
 func GetUnreadFeedIds(user, srcId string) []string {

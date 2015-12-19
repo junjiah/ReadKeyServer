@@ -87,6 +87,21 @@ func main() {
 		}
 	})
 
+	// Unsubscribe a feed source.
+	authorized.DELETE("subscription/*id", func(c *gin.Context) {
+		c.Writer.WriteHeader(404)
+		username := c.MustGet(gin.AuthUserKey).(string)
+		if subId := c.Param("id"); subId != "/" {
+			// Off-by-one to ignore the first '/'.
+			subId = util.Escape(subId[1:])
+			if success := user.RemoveFeedSubscription(username, subId); success {
+				c.Writer.WriteHeader(200)
+			} else {
+				c.Writer.WriteHeader(404)
+			}
+		}
+	})
+
 	// Mark a feed item as read.
 	authorized.PUT("subscription/*id", func(c *gin.Context) {
 		username := c.MustGet(gin.AuthUserKey).(string)
