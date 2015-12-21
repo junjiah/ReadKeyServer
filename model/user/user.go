@@ -117,7 +117,6 @@ func GetUnreadFeedCount(user, srcId string) int64 {
 	return cnt
 }
 
-// TODO: Will be deprecated by using *latest* with Redis's capped list.
 func InitUserUnreadQueue(user, srcId string) {
 	c := rs.GetConnection()
 	defer c.Close()

@@ -1,7 +1,10 @@
 package feeder
 
 import (
+	"crypto/sha1"
+	"fmt"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 
@@ -18,6 +21,10 @@ type feedHandler struct {
 	seenItems       []string
 	keepSeenItemNum int
 	channelId       string
+	// For random item ID generation.
+	channelKey    string
+	itemCount     int
+	itemCountLock *sync.Mutex
 	// Fetcher for keywords or summaries.
 	kwFetcher keyword.KeywordFetcher
 }
@@ -28,6 +35,9 @@ func newFeedHandler(newChannelNofityCh chan<- channelInfo, keywordServerEndPoint
 		seenItems:          nil,
 		keepSeenItemNum:    50, // Default value.
 		channelId:          "",
+		channelKey:         "",
+		itemCount:          0,
+		itemCountLock:      &sync.Mutex{},
 		// The keyword server address such as "http://localhost:4567/keywords".
 		kwFetcher: keyword.NewKeywordFetcher(keywordServerEndPoint),
 	}
@@ -42,18 +52,12 @@ func (h *feedHandler) ProcessItems(rssFeed *rss.Feed, ch *rss.Channel, items []*
 
 	// Handle channel.
 	if h.channelId == "" {
-		if cid := getChannelId(ch); cid != "" {
-			doneCh := make(chan struct{})
-			h.newChannelNofityCh <- channelInfo{rssFeed.Url, cid, ch.Title, doneCh}
-			<-doneCh
-			h.channelId = cid
-		} else {
-			// TODO: Proper error handling. Currently simply ignore.
-			// The consequence is that: there is a goroutine listening to this channel,
-			// but user can never get its feed source ID.
-			log.Printf("[e] Processing channel %v failed\n", rssFeed.Url)
-			return
-		}
+		cid := getChannelId(ch)
+		doneCh := make(chan struct{})
+		h.newChannelNofityCh <- channelInfo{rssFeed.Url, cid, ch.Title, doneCh}
+		<-doneCh
+		h.channelId = cid
+		h.channelKey = ch.Key()
 	}
 
 	// Get subscribers of the current channel.
@@ -75,74 +79,69 @@ func (h *feedHandler) ProcessItems(rssFeed *rss.Feed, ch *rss.Channel, items []*
 	log.Printf("[i] Found %d new items(s) in %s\n", len(newitems), rssFeed.Url)
 	var wg sync.WaitGroup
 	for _, item := range newitems {
-		if id := getItemId(item); id != "" {
 
-			// Append to subscribers' unread queue.
-			for _, username := range subscribers {
-				user.AppendUnreadFeedId(username, h.channelId, id)
-			}
+		id := h.getItemId(item)
 
-			// Store the actual content of the feed item.
-			contentPtr := getItemContent(item)
-			link := ""
-			if len(item.Links) > 0 {
-				link = item.Links[0].Href
-			}
-			feedItem := feed.FeedItem{
-				Link:    link,
-				Content: *contentPtr,
-			}
-			feed.SetFeed(id, feedItem)
-
-			// Append to its corresponding feed source by spawning a new goroutine.
-			lang := getLang(item, ch)
-			wg.Add(1)
-			go func(id, title, pubDate string) {
-				defer wg.Done()
-				entry := feed.FeedItemEntry{
-					FeedId:  id,
-					Title:   title,
-					PubDate: pubDate,
-				}
-				const retry = 3
-				fetchResCh := h.kwFetcher.Fetch(contentPtr, lang, retry)
-				select {
-				case kw := <-fetchResCh:
-					entry.Keywords = kw
-				// 1 second timeout.
-				case <-time.After(1 * time.Second):
-				}
-				feed.AddFeedEntryToSource(h.channelId, entry)
-			}(id, item.Title, item.PubDate)
-		} else {
-			log.Printf("[e] Parsing item ID failed for %v\n", item)
+		// Store the actual content of the feed item.
+		contentPtr := getItemContent(item)
+		link := ""
+		if len(item.Links) > 0 {
+			link = item.Links[0].Href
 		}
-		wg.Wait()
+		feedItem := feed.FeedItem{
+			Link:    link,
+			Content: *contentPtr,
+		}
+		feed.SetFeed(id, feedItem)
+
+		// Then append to the feed source's latest queue.
+		feed.AppendLatestFeedIdToSource(h.channelId, id)
+
+		// Then append to subscribers' unread queue.
+		for _, username := range subscribers {
+			user.AppendUnreadFeedId(username, h.channelId, id)
+		}
+
+		// Append to its corresponding feed source by spawning a new goroutine.
+		lang := getLang(item, ch)
+		wg.Add(1)
+		go func(id, title, pubDate string) {
+			defer wg.Done()
+			entry := feed.FeedItemEntry{
+				FeedId:  id,
+				Title:   title,
+				PubDate: pubDate,
+			}
+			const retry = 3
+			fetchResCh := h.kwFetcher.Fetch(contentPtr, lang, retry)
+			select {
+			case kw := <-fetchResCh:
+				entry.Keywords = kw
+			// 1 second timeout.
+			case <-time.After(1 * time.Second):
+			}
+			feed.AddFeedEntryToSource(h.channelId, entry)
+		}(id, item.Title, item.PubDate)
 	}
+	wg.Wait()
 }
 
-func getChannelId(c *rss.Channel) (res string) {
-	if c.Id != "" {
-		// For atom.
-		res = util.FormatFeedSourceKey(c.Id)
-	} else if len(c.Links) > 0 {
-		// For rss.
-		res = util.FormatFeedSourceKey(c.Links[0].Href)
-	}
+func (h *feedHandler) getItemId(i *rss.Item) (res string) {
+	// In case of concurrent invocation (which should not happen),
+	// it's just for the peace of my mind.
+	h.itemCountLock.Lock()
+	cnt := h.itemCount
+	h.itemCount++
+	h.itemCountLock.Unlock()
+	// Concatenate the counter to the channel key.
+	key := strconv.Itoa(cnt) + h.channelKey
+	res = util.FormatFeedKey(fmt.Sprintf("%x", sha1.Sum([]byte(key))))
 	return
 }
 
-func getItemId(i *rss.Item) (res string) {
-	if i.Id != "" {
-		// For atom.
-		res = util.FormatFeedKey(i.Id)
-	} else if i.Guid != nil {
-		// For rss.
-		res = util.FormatFeedKey(*i.Guid)
-	} else if len(i.Links) > 0 {
-		// Fallback, using links.
-		res = util.FormatFeedKey(i.Links[0].Href)
-	}
+func getChannelId(ch *rss.Channel) (res string) {
+	k := ch.Key()
+	res = util.FormatFeedSourceKey(fmt.Sprintf("%x", sha1.Sum([]byte(k))))
 	return
 }
 

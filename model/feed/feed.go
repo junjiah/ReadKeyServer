@@ -9,6 +9,11 @@ import (
 	"github.com/garyburd/redigo/redis"
 )
 
+const (
+	latestFeedCapacity  = 100
+	initUnreadFeedCount = 15
+)
+
 var rs libstore.RedisStrore
 
 // Must be called before other functions.
@@ -79,12 +84,26 @@ func GetFeedEntriesFromSource(srcId string, feedIds []string) []FeedItemEntry {
 	return res
 }
 
-// TODO: Will be deprecated by using *latest* with Redis's capped list.
+func AppendLatestFeedIdToSource(srcId, feedId string) {
+	c := rs.GetConnection()
+	defer c.Close()
+
+	latestKey := util.FormatLatestFeedsKey(srcId)
+	c.Send("MULTI")
+	c.Send("LPUSH", latestKey, feedId)
+	c.Send("LTRIM", latestKey, 0, latestFeedCapacity-1)
+	if _, err := c.Do("EXEC"); err != nil {
+		// TODO: Detailed log & retry.
+		log.Printf("[e] Failed to push latest feed ID to a source.\n")
+	}
+}
+
 func GetLatestFeedIdsFromSource(srcId string) []string {
 	c := rs.GetConnection()
 	defer c.Close()
 
-	feedIds, err := redis.Strings(c.Do("HKEYS", srcId))
+	latestKey := util.FormatLatestFeedsKey(srcId)
+	feedIds, err := redis.Strings(c.Do("LRANGE", latestKey, 0, initUnreadFeedCount-1))
 	if err != nil {
 		// TODO: Detailed log & retry.
 		log.Printf("[e] Failed to get latest feed IDs from a source.\n")
