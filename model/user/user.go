@@ -39,16 +39,27 @@ func GetFeedSubscriptions(user string) []feed.FeedSource {
 	return res
 }
 
-func AppendFeedSubscription(user string, src feed.FeedSource) {
+// Try to add a subscription to a user, return false if already exists (or error).
+func AppendFeedSubscription(user string, src feed.FeedSource) bool {
 	c := rs.GetConnection()
 	defer c.Close()
 
 	userSubKey := util.FormatUserSubsKey(user)
+
+	exists, err := redis.Bool(c.Do("HEXISTS", userSubKey, src.SourceId))
+	if err != nil {
+		log.Printf("[e] Failed to check whether feed subscription exists for a user.\n")
+		return false
+	} else if exists {
+		return false
+	}
+
 	srcPacket, _ := json.Marshal(src)
 	if _, err := c.Do("HSET", userSubKey, src.SourceId, srcPacket); err != nil {
 		// TODO: Detailed log.
 		log.Printf("[e] Failed to append feed subscription to user.\n")
 	}
+	return true
 }
 
 // Remove the subsribed feed source, return true if successful.
