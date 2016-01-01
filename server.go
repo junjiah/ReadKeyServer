@@ -40,7 +40,7 @@ func init() {
 func tokenAuthRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if sessions.Default(c).Get("userid") == nil {
-			c.Redirect(301, "/login")
+			c.Redirect(302, "/login")
 		} else {
 			c.Next()
 		}
@@ -101,7 +101,7 @@ func main() {
 			c.String(500, err.Error())
 			return
 		}
-		c.Redirect(301, "/")
+		c.Redirect(302, "/")
 	})
 
 	authorized := r.Group("/")
@@ -113,6 +113,14 @@ func main() {
 		authorized.StaticFile("/app.js", "./web/app.js")
 		authorized.StaticFile("/style.css", "./web/style.css")
 		authorized.Static("/assets", "./web/assets")
+
+		// Logout endporint.
+		authorized.GET("logout", func(c *gin.Context) {
+			session := sessions.Default(c)
+			session.Clear()
+			session.Save()
+			c.String(200, "You Have Successfully Logged Out.")
+		})
 
 		// Get the list of subscribed feed sources, if successful return the list of format
 		// { subscriptions: [{ id, title }] }.
