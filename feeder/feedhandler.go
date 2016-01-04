@@ -4,7 +4,6 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"log"
-	"strconv"
 	"sync"
 	"time"
 
@@ -22,10 +21,7 @@ type feedHandler struct {
 	seenItems       []string
 	keepSeenItemNum int
 	channelID       string
-	// For random item ID generation.
-	channelKey    string
-	itemCount     int
-	itemCountLock *sync.Mutex
+	channelURL      string
 	// Fetcher for keywords or summaries.
 	kwFetcher keyword.KeywordFetcher
 }
@@ -35,10 +31,8 @@ func newFeedHandler(newSrcCh chan<- feed.FeedSource, keywordServerEndPoint strin
 		newSrcCh:        newSrcCh,
 		seenItems:       nil,
 		keepSeenItemNum: 50, // Default value.
-		channelID:       "",
-		channelKey:      "",
-		itemCount:       0,
-		itemCountLock:   &sync.Mutex{},
+		channelURL:      "", // Canonical URL acquired in `ProcessItems`.
+		channelID:       "", // Hash of the channel URL.
 		// The keyword server address such as "http://localhost:4567/keywords".
 		kwFetcher: keyword.NewKeywordFetcher(keywordServerEndPoint),
 	}
@@ -46,17 +40,14 @@ func newFeedHandler(newSrcCh chan<- feed.FeedSource, keywordServerEndPoint strin
 
 func (h *feedHandler) ProcessItems(rssFeed *rss.Feed, ch *rss.Channel, items []*rss.Item) {
 	// Update capacity. ASSUME it's reasonable.
-	// TODO: May not be safe enough.
 	if len(items) > h.keepSeenItemNum {
 		h.keepSeenItemNum = len(items)
 	}
 
-	// Handle channel for first time processing.
+	// Handle channel for first time processing. Using hash of URL as the unique ID.
 	if h.channelID == "" {
-		cid := getChannelID(ch)
-		// Channel guaranteed not empty.
-		h.channelID = cid
-		h.channelKey = ch.Key()
+		h.channelURL = rssFeed.Url
+		h.channelID = getChannelID(h.channelURL)
 	}
 
 	// Get subscribers of the current channel.
@@ -124,7 +115,7 @@ func (h *feedHandler) ProcessItems(rssFeed *rss.Feed, ch *rss.Channel, items []*
 	}
 	wg.Wait()
 
-	// Send back the newly established feed source if haven't done so. Then nullify it.
+	// Send back the newly established feed source if haven't done so. Then nullify the channel.
 	if h.newSrcCh != nil {
 		h.newSrcCh <- feed.FeedSource{
 			URL:      rssFeed.Url,
@@ -136,23 +127,21 @@ func (h *feedHandler) ProcessItems(rssFeed *rss.Feed, ch *rss.Channel, items []*
 }
 
 func (h *feedHandler) getItemID(i *rss.Item) (res string) {
-	// In case of concurrent invocation (which should not happen),
-	// it's just for the peace of my mind.
-	h.itemCountLock.Lock()
-	cnt := h.itemCount
-	h.itemCount++
-	h.itemCountLock.Unlock()
-	// Concatenate the counter to the channel key.
-	// TODO: Is channel key really unique?
-	key := strconv.Itoa(cnt) + h.channelKey
-	res = util.FormatFeedKey(fmt.Sprintf("%x", sha1.Sum([]byte(key))))
-	return
+	// Based on channel key, then concatenate the per-item ID.
+	itemID := h.channelURL
+	if i.Id != "" { // Atom.
+		itemID += i.Id
+	} else if i.Guid != nil { // RSS.
+		itemID += *i.Guid
+	} else {
+		// Fallback, use required title + description. Should happen rarely.
+		itemID += i.Title + *getItemContent(i)
+	}
+	return util.FormatFeedKey(fmt.Sprintf("%x", sha1.Sum([]byte(itemID))))
 }
 
-func getChannelID(ch *rss.Channel) (res string) {
-	k := ch.Key()
-	res = util.FormatFeedSourceKey(fmt.Sprintf("%x", sha1.Sum([]byte(k))))
-	return
+func getChannelID(key string) string {
+	return util.FormatFeedSourceKey(fmt.Sprintf("%x", sha1.Sum([]byte(key))))
 }
 
 func getItemContent(i *rss.Item) *string {

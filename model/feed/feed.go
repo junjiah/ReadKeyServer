@@ -47,7 +47,7 @@ func GetFeedSourceSubscribers(srcId string) []string {
 	subers, err := redis.Strings(c.Do("LRANGE", subKey, 0, -1))
 	if err != nil {
 		// TODO: Detailed log & retry.
-		log.Printf("[e] Failed to get feed source subscribers: \n", err.Error())
+		log.Printf("[e] Failed to get feed source subscribers: %v\n", err.Error())
 		return nil
 	}
 
@@ -153,4 +153,33 @@ func SetFeed(feedId string, fi FeedItem) {
 		// TODO: Detailed log & retry.
 		log.Printf("[e] Failed to set a feed item.\n")
 	}
+}
+
+func GetListeningFeedSources() []FeedSource {
+	c := rs.GetConnection()
+	defer c.Close()
+
+	srcs, err := redis.Strings(c.Do("SMEMBERS", util.FormatListeningKey()))
+	if err != nil {
+		// TODO: Detailed log & retry.
+		log.Printf("[e] Failed to get all listening feed sources.\n")
+		return nil
+	}
+
+	var fs FeedSource
+	res := make([]FeedSource, 0, len(srcs))
+	for _, src := range srcs {
+		// Assume no unmarshalling error.
+		json.Unmarshal([]byte(src), &fs)
+		res = append(res, fs)
+	}
+	return res
+}
+
+func AppendListeningFeedSource(src FeedSource) {
+	c := rs.GetConnection()
+	defer c.Close()
+
+	srcPacket, _ := json.Marshal(src)
+	c.Do("SADD", util.FormatListeningKey(), srcPacket)
 }

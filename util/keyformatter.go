@@ -37,6 +37,11 @@ func FormatSubscriberKey(feedSrcId string) string {
 	return Escape("subscriber:" + feedSrcId)
 }
 
+// Key to retrieve currently listening feed sources.
+func FormatListeningKey() string {
+	return "listening"
+}
+
 func Escape(s string) string {
 	return url.QueryEscape(s)
 }

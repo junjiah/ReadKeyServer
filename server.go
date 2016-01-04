@@ -28,12 +28,12 @@ var (
 // Parse command line arguments and set up libstore and ReadKey feeder.
 func init() {
 	flag.Parse()
-	// Init feeder.
-	fd = feeder.NewFeeder("http://localhost:" + *keywordServerEndPoint)
 	// Init the models and backend redis store.
 	rs := libstore.NewStore(*redisServer)
 	user.Setup(rs)
 	feed.Setup(rs)
+	// Init feeder.
+	fd = feeder.NewFeeder("http://localhost:" + *keywordServerEndPoint)
 }
 
 // Middleware for authentication using Auth0.

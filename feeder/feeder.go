@@ -25,11 +25,14 @@ type feeder struct {
 
 // NewFeeder builds the feeder and start the background goroutine.
 func NewFeeder(keywordServerEndPoint string) Feeder {
-	return &feeder{
+	fd := &feeder{
 		urlToFeedSrc:          make(map[string]feed.FeedSource),
 		urlToFeedSrcLock:      &sync.Mutex{},
 		keywordServerEndPoint: keywordServerEndPoint,
 	}
+	// Try to re-listen to feed sources if existing, as a recovery method.
+	fd.recover()
+	return fd
 }
 
 // Requires the URL to exact match actual feed's URL.
@@ -49,9 +52,10 @@ func (f *feeder) GetFeedSource(url string) (feed.FeedSource, error) {
 	select {
 	case src := <-newSrcCh:
 		f.urlToFeedSrc[src.URL] = src
+		feed.AppendListeningFeedSource(src)
 		return src, nil
 	case err := <-errCh:
-		return feed.FeedSource{}, errors.New("subscribe faild: " + err.Error())
+		return feed.FeedSource{}, errors.New("subscribe failed: " + err.Error())
 	}
 }
 
@@ -66,11 +70,26 @@ func (f *feeder) listen(url string, newSrcCh chan<- feed.FeedSource, errCh chan<
 	go func() {
 		for {
 			if err := rssFeed.Fetch(url, nil); err != nil {
-				// Fetch failed, could be an invalid source. Exit. Will not block since it's buffered.
-				errCh <- err
+				// Fetch failed, could be an invalid source. Exit.
+				if errCh != nil {
+					// Will not block since it's buffered.
+					errCh <- err
+				}
 				return
 			}
 			<-time.After(time.Duration(rssFeed.SecondsTillUpdate() * 1e9))
 		}
 	}()
+}
+
+// Recovery happens when starting after the server accidentally exits. Primarily it reconstructs the URL to
+// feed source map and restarts listening to them. However there are some unexpected consequences:
+// 1. Every feed item will be regarded as new to subscribed users. (Hopefully acceptable.)
+// 2. In this way, latest feeds for each source may contain duplicate items. (Also hopefully acceptable.)
+func (f *feeder) recover() {
+	listeningSrcs := feed.GetListeningFeedSources()
+	for _, src := range listeningSrcs {
+		f.urlToFeedSrc[src.URL] = src
+		f.listen(src.URL, nil, nil)
+	}
 }
