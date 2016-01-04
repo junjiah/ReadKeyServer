@@ -135,13 +135,13 @@ func main() {
 		authorized.POST("subscription", func(c *gin.Context) {
 			c.Writer.WriteHeader(400)
 			username := sessions.Default(c).Get("userid").(string)
-			if subUrl := c.PostForm("url"); subUrl != "" {
-				src, err := fd.GetFeedSource(subUrl)
+			if subURL := c.PostForm("url"); subURL != "" {
+				src, err := fd.GetFeedSource(subURL)
 				if err != nil {
 					c.JSON(400, gin.H{"error": err.Error()})
 					return
 				}
-				if ok := user.AppendFeedSubscription(username, *src); ok {
+				if ok := user.AppendFeedSubscription(username, src); ok {
 					feed.AddFeedSourceSubscriber(src.SourceId, username)
 					// Init unread items for current user.
 					user.InitUserUnreadQueue(username, src.SourceId)
@@ -160,11 +160,11 @@ func main() {
 			username := sessions.Default(c).Get("userid").(string)
 			// TODO: Get unread parameter from request.
 			// unreadOnly := true
-			if subId := c.Param("id"); subId != "/" {
+			if subID := c.Param("id"); subID != "/" {
 				// Off-by-one to ignore the first '/'.
-				subId = util.Escape(subId[1:])
-				unreadIds := user.GetUnreadFeedIds(username, subId)
-				entries := feed.GetFeedEntriesFromSource(subId, unreadIds)
+				subID = util.Escape(subID[1:])
+				unreadIds := user.GetUnreadFeedIds(username, subID)
+				entries := feed.GetFeedEntriesFromSource(subID, unreadIds)
 				c.JSON(200, gin.H{"feeds": entries})
 			}
 		})
@@ -173,10 +173,10 @@ func main() {
 		authorized.DELETE("subscription/*id", func(c *gin.Context) {
 			c.Writer.WriteHeader(404)
 			username := sessions.Default(c).Get("userid").(string)
-			if subId := c.Param("id"); subId != "/" {
+			if subID := c.Param("id"); subID != "/" {
 				// Off-by-one to ignore the first '/'.
-				subId = util.Escape(subId[1:])
-				if success := user.RemoveFeedSubscription(username, subId); success {
+				subID = util.Escape(subID[1:])
+				if success := user.RemoveFeedSubscription(username, subID); success {
 					c.Writer.WriteHeader(200)
 				} else {
 					c.Writer.WriteHeader(404)
@@ -188,14 +188,14 @@ func main() {
 		authorized.PUT("subscription/*id", func(c *gin.Context) {
 			username := sessions.Default(c).Get("userid").(string)
 			var form struct {
-				ItemId string `form:"itemId" binding:"required"`
+				ItemID string `form:"itemId" binding:"required"`
 				Read   bool   `form:"read" binding:"required"`
 			}
 
 			if c.Bind(&form) == nil {
-				srcId := util.Escape(c.Param("id")[1:])
-				feedId := util.Escape(form.ItemId)
-				user.RemoveUnreadFeedId(username, srcId, feedId)
+				srcID := util.Escape(c.Param("id")[1:])
+				feedID := util.Escape(form.ItemID)
+				user.RemoveUnreadFeedId(username, srcID, feedID)
 				c.Writer.WriteHeader(204)
 			}
 		})
@@ -204,10 +204,10 @@ func main() {
 		authorized.GET("unreadcount/*id", func(c *gin.Context) {
 			c.Writer.WriteHeader(400)
 			username := sessions.Default(c).Get("userid").(string)
-			if subId := c.Param("id"); subId != "/" {
+			if subID := c.Param("id"); subID != "/" {
 				// Off-by-one to ignore the first '/'.
-				subId = util.Escape(subId[1:])
-				cnt := user.GetUnreadFeedCount(username, subId)
+				subID = util.Escape(subID[1:])
+				cnt := user.GetUnreadFeedCount(username, subID)
 				c.String(200, strconv.FormatInt(cnt, 10))
 			}
 		})
@@ -215,10 +215,10 @@ func main() {
 		// Retrieve the specific feed of the format { link, content } if successful.
 		authorized.GET("feed/*id", func(c *gin.Context) {
 			c.Writer.WriteHeader(400)
-			if feedId := c.Param("id"); feedId != "/" {
+			if feedID := c.Param("id"); feedID != "/" {
 				// Off-by-one to ignore the first '/'.
-				feedId = util.Escape(feedId[1:])
-				item := feed.GetFeed(feedId)
+				feedID = util.Escape(feedID[1:])
+				item := feed.GetFeed(feedID)
 				c.JSON(200, item)
 			}
 		})

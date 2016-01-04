@@ -24,6 +24,7 @@ func Setup(store libstore.RedisStrore) {
 type FeedSource struct {
 	SourceId string `json:"id"`
 	Title    string `json:"title"`
+	URL      string `json:"url"`
 }
 
 type FeedItemEntry struct {
