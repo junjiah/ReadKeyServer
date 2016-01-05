@@ -61,8 +61,7 @@ func (f *feeder) GetFeedSource(url string) (feed.Source, error) {
 
 // When encountering a new feed source, begin listening if valid.
 func (f *feeder) listen(url string, newSrcCh chan<- feed.Source, errCh chan<- error) {
-	// TODO: Change timeout in production. For now it's 1 min.
-	const timeout = 1
+	const timeout = 5
 	handler := newFeedHandler(newSrcCh, f.keywordServerEndPoint)
 	rssFeed := rss.NewWithHandlers(timeout, true, nil, handler)
 	rssFeed.IgnoreCacheOnce()

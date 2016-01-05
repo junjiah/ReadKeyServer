@@ -107,8 +107,8 @@ func (h *feedHandler) ProcessItems(rssFeed *rss.Feed, ch *rss.Channel, items []*
 			select {
 			case kw := <-fetchResCh:
 				entry.Keywords = kw
-			// 1 second timeout.
-			case <-time.After(1 * time.Second):
+			// 10 seconds timeout.
+			case <-time.After(10 * time.Second):
 			}
 			feed.AddItemEntryToSource(h.channelID, entry)
 		}(id, item.Title, item.PubDate)
