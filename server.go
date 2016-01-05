@@ -142,9 +142,9 @@ func main() {
 					return
 				}
 				if ok := user.AppendFeedSubscription(username, src); ok {
-					feed.AddFeedSourceSubscriber(src.SourceId, username)
+					feed.AddSourceSubscriber(src.SourceID, username)
 					// Init unread items for current user.
-					user.InitUserUnreadQueue(username, src.SourceId)
+					user.InitUserUnreadQueue(username, src.SourceID)
 					c.JSON(201, src)
 				} else {
 					// Duplicates or error.
@@ -164,7 +164,7 @@ func main() {
 				// Off-by-one to ignore the first '/'.
 				subID = util.Escape(subID[1:])
 				unreadIds := user.GetUnreadFeedIds(username, subID)
-				entries := feed.GetFeedEntriesFromSource(subID, unreadIds)
+				entries := feed.GetItemEntriesFromSource(subID, unreadIds)
 				c.JSON(200, gin.H{"feeds": entries})
 			}
 		})
@@ -195,7 +195,7 @@ func main() {
 			if c.Bind(&form) == nil {
 				srcID := util.Escape(c.Param("id")[1:])
 				feedID := util.Escape(form.ItemID)
-				user.RemoveUnreadFeedId(username, srcID, feedID)
+				user.RemoveUnreadFeedItemID(username, srcID, feedID)
 				c.Writer.WriteHeader(204)
 			}
 		})
@@ -218,7 +218,7 @@ func main() {
 			if feedID := c.Param("id"); feedID != "/" {
 				// Off-by-one to ignore the first '/'.
 				feedID = util.Escape(feedID[1:])
-				item := feed.GetFeed(feedID)
+				item := feed.GetItem(feedID)
 				c.JSON(200, item)
 			}
 		})

@@ -6,6 +6,7 @@ import (
 
 	"github.com/edfward/readkey/libstore"
 	"github.com/edfward/readkey/util"
+
 	"github.com/garyburd/redigo/redis"
 )
 
@@ -16,34 +17,42 @@ const (
 
 var rs libstore.RedisStrore
 
-// Must be called before other functions.
+// Setup must be called before other functions to configure the Redis store.
 func Setup(store libstore.RedisStrore) {
 	rs = store
 }
 
-type FeedSource struct {
-	SourceId string `json:"id"`
+// Source describes a site's feed source (Atom or RSS).
+// Serialized as JSON, not in Redis top level.
+type Source struct {
+	SourceID string `json:"id"`
 	Title    string `json:"title"`
 	URL      string `json:"url"`
 }
 
-type FeedItemEntry struct {
-	FeedId   string `json:"id"`
+// ItemEntry describes an entry struct to the actual feed item, so only contains
+// a subset of the information. Serialized as JSON, not in Redis top level.
+type ItemEntry struct {
+	FeedID   string `json:"id"`
 	Title    string `json:"title"`
 	Keywords string `json:"keywords"`
 	PubDate  string `json:"pubDate"`
 }
 
-type FeedItem struct {
+// Item keeps the actual feed item, which are stored into top-level Redis
+type Item struct {
 	Link    string `json:"link" redis:"link"`
 	Content string `json:"content" redis:"content"`
 }
 
-func GetFeedSourceSubscribers(srcId string) []string {
+// GetSourceSubscribers retrieves subscribed user IDs.
+// TODO: Currently even if a user unsubscribes a feed source, the subscriber list
+// of that source doesn't remove that user.
+func GetSourceSubscribers(srcID string) []string {
 	c := rs.GetConnection()
 	defer c.Close()
 
-	subKey := util.FormatSubscriberKey(srcId)
+	subKey := util.FormatSubscriberKey(srcID)
 	subers, err := redis.Strings(c.Do("LRANGE", subKey, 0, -1))
 	if err != nil {
 		// TODO: Detailed log & retry.
@@ -54,30 +63,33 @@ func GetFeedSourceSubscribers(srcId string) []string {
 	return subers
 }
 
-func AddFeedSourceSubscriber(srcId, user string) {
+// AddSourceSubscriber adds a user to a feed source's subscriber list.
+func AddSourceSubscriber(srcID, user string) {
 	c := rs.GetConnection()
 	defer c.Close()
 
-	subKey := util.FormatSubscriberKey(srcId)
+	subKey := util.FormatSubscriberKey(srcID)
 	if _, err := c.Do("RPUSH", subKey, user); err != nil {
 		// TODO: Detailed log & retry.
 		log.Printf("[e] Failed to append subscriber to a feed source.\n")
 	}
 }
 
-func GetFeedEntriesFromSource(srcId string, feedIds []string) []FeedItemEntry {
+// GetItemEntriesFromSource returns a list of feed item entries given a list
+// of feed IDs.
+func GetItemEntriesFromSource(srcID string, feedIDs []string) []ItemEntry {
 	c := rs.GetConnection()
 	defer c.Close()
 
-	entries, err := redis.Strings(c.Do("HMGET", redis.Args{}.Add(srcId).AddFlat(feedIds)...))
+	entries, err := redis.Strings(c.Do("HMGET", redis.Args{}.Add(srcID).AddFlat(feedIDs)...))
 	if err != nil {
 		// TODO: Detailed log & retry.
 		log.Printf("[e] Failed to get feed entries from a source.\n")
 		return nil
 	}
 
-	var fe FeedItemEntry
-	res := make([]FeedItemEntry, 0, len(entries))
+	var fe ItemEntry
+	res := make([]ItemEntry, 0, len(entries))
 	for _, entry := range entries {
 		json.Unmarshal([]byte(entry), &fe)
 		res = append(res, fe)
@@ -85,13 +97,14 @@ func GetFeedEntriesFromSource(srcId string, feedIds []string) []FeedItemEntry {
 	return res
 }
 
-func AppendLatestFeedIdToSource(srcId, feedId string) {
+// AppendLatestItemIDToSource appends a feed ID to the latest queue (a capped list) of a feed source.
+func AppendLatestItemIDToSource(srcID, feedID string) {
 	c := rs.GetConnection()
 	defer c.Close()
 
-	latestKey := util.FormatLatestFeedsKey(srcId)
+	latestKey := util.FormatLatestFeedsKey(srcID)
 	c.Send("MULTI")
-	c.Send("LPUSH", latestKey, feedId)
+	c.Send("LPUSH", latestKey, feedID)
 	c.Send("LTRIM", latestKey, 0, latestFeedCapacity-1)
 	if _, err := c.Do("EXEC"); err != nil {
 		// TODO: Detailed log & retry.
@@ -99,63 +112,69 @@ func AppendLatestFeedIdToSource(srcId, feedId string) {
 	}
 }
 
-func GetLatestFeedIdsFromSource(srcId string) []string {
+// GetLatestItemIdsFromSource fetches the latest feed IDs of a feed source.
+func GetLatestItemIdsFromSource(srcID string) []string {
 	c := rs.GetConnection()
 	defer c.Close()
 
-	latestKey := util.FormatLatestFeedsKey(srcId)
-	feedIds, err := redis.Strings(c.Do("LRANGE", latestKey, 0, initUnreadFeedCount-1))
+	latestKey := util.FormatLatestFeedsKey(srcID)
+	feedIDs, err := redis.Strings(c.Do("LRANGE", latestKey, 0, initUnreadFeedCount-1))
 	if err != nil {
 		// TODO: Detailed log & retry.
 		log.Printf("[e] Failed to get latest feed IDs from a source.\n")
 		return nil
 	}
-	return feedIds
+	return feedIDs
 }
 
-func AddFeedEntryToSource(srcId string, fe FeedItemEntry) {
+// AddItemEntryToSource adds a feed item entry to a feed source.
+func AddItemEntryToSource(srcID string, fe ItemEntry) {
 	c := rs.GetConnection()
 	defer c.Close()
 
 	fePacket, _ := json.Marshal(fe)
-	if _, err := c.Do("HSET", srcId, fe.FeedId, fePacket); err != nil {
+	if _, err := c.Do("HSET", srcID, fe.FeedID, fePacket); err != nil {
 		// TODO: Detailed log & retry.
 		log.Printf("[e] Failed to add feed entry to a source.\n")
 	}
 }
 
-func GetFeed(feedId string) FeedItem {
+// GetItem retrieves the actual content of a feed.
+func GetItem(feedID string) Item {
 	c := rs.GetConnection()
 	defer c.Close()
 
-	var fi FeedItem
-	v, err := redis.Values(c.Do("HGETALL", feedId))
+	var fi Item
+	v, err := redis.Values(c.Do("HGETALL", feedID))
 	if err != nil {
 		// TODO: Detailed log & retry.
 		log.Printf("[e] Failed to get a feed item.\n")
-		return FeedItem{}
+		return Item{}
 	}
 
 	if err := redis.ScanStruct(v, &fi); err != nil {
 		// TODO: Detailed log & retry.
 		log.Printf("[e] Failed to scan the feed item.\n")
-		return FeedItem{}
+		return Item{}
 	}
 
 	return fi
 }
 
-func SetFeed(feedId string, fi FeedItem) {
+// SetItem sets the actual content of a feed.
+func SetItem(feedID string, fi Item) {
 	c := rs.GetConnection()
 	defer c.Close()
 
-	if _, err := c.Do("HMSET", redis.Args{}.Add(feedId).AddFlat(&fi)...); err != nil {
+	if _, err := c.Do("HMSET", redis.Args{}.Add(feedID).AddFlat(&fi)...); err != nil {
 		// TODO: Detailed log & retry.
 		log.Printf("[e] Failed to set a feed item.\n")
 	}
 }
 
-func GetListeningFeedSources() []FeedSource {
+// GetListeningSources fetches all listening feed sources.
+// TODO: For now it only grows but never shrinks.
+func GetListeningSources() []Source {
 	c := rs.GetConnection()
 	defer c.Close()
 
@@ -166,8 +185,8 @@ func GetListeningFeedSources() []FeedSource {
 		return nil
 	}
 
-	var fs FeedSource
-	res := make([]FeedSource, 0, len(srcs))
+	var fs Source
+	res := make([]Source, 0, len(srcs))
 	for _, src := range srcs {
 		// Assume no unmarshalling error.
 		json.Unmarshal([]byte(src), &fs)
@@ -176,7 +195,8 @@ func GetListeningFeedSources() []FeedSource {
 	return res
 }
 
-func AppendListeningFeedSource(src FeedSource) {
+// AppendListeningSource appends a feed source to the listening list.
+func AppendListeningSource(src Source) {
 	c := rs.GetConnection()
 	defer c.Close()
 

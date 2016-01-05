@@ -7,17 +7,19 @@ import (
 	"github.com/edfward/readkey/libstore"
 	"github.com/edfward/readkey/model/feed"
 	"github.com/edfward/readkey/util"
+
 	"github.com/garyburd/redigo/redis"
 )
 
 var rs libstore.RedisStrore
 
-// Must be called before other functions.
+// Setup must be called before other functions to configure the Redis store.
 func Setup(store libstore.RedisStrore) {
 	rs = store
 }
 
-func GetFeedSubscriptions(user string) []feed.FeedSource {
+// GetFeedSubscriptions fetches all subscribed feed sources of a user.
+func GetFeedSubscriptions(user string) []feed.Source {
 	c := rs.GetConnection()
 	defer c.Close()
 
@@ -29,8 +31,8 @@ func GetFeedSubscriptions(user string) []feed.FeedSource {
 		return nil
 	}
 
-	var fs feed.FeedSource
-	res := make([]feed.FeedSource, 0, len(srcs))
+	var fs feed.Source
+	res := make([]feed.Source, 0, len(srcs))
 	for _, src := range srcs {
 		// Assume no unmarshalling error.
 		json.Unmarshal([]byte(src), &fs)
@@ -39,14 +41,14 @@ func GetFeedSubscriptions(user string) []feed.FeedSource {
 	return res
 }
 
-// Try to add a subscription to a user, return false if already exists (or error).
-func AppendFeedSubscription(user string, src feed.FeedSource) bool {
+// AppendFeedSubscription tries to add a subscription to a user, return false if already exists (or error).
+func AppendFeedSubscription(user string, src feed.Source) bool {
 	c := rs.GetConnection()
 	defer c.Close()
 
 	userSubKey := util.FormatUserSubsKey(user)
 
-	exists, err := redis.Bool(c.Do("HEXISTS", userSubKey, src.SourceId))
+	exists, err := redis.Bool(c.Do("HEXISTS", userSubKey, src.SourceID))
 	if err != nil {
 		log.Printf("[e] Failed to check whether feed subscription exists for a user.\n")
 		return false
@@ -55,20 +57,20 @@ func AppendFeedSubscription(user string, src feed.FeedSource) bool {
 	}
 
 	srcPacket, _ := json.Marshal(src)
-	if _, err := c.Do("HSET", userSubKey, src.SourceId, srcPacket); err != nil {
+	if _, err := c.Do("HSET", userSubKey, src.SourceID, srcPacket); err != nil {
 		// TODO: Detailed log.
 		log.Printf("[e] Failed to append feed subscription to user.\n")
 	}
 	return true
 }
 
-// Remove the subsribed feed source, return true if successful.
-func RemoveFeedSubscription(user, srcId string) bool {
+// RemoveFeedSubscription removes the subscribed feed source, return true if successful.
+func RemoveFeedSubscription(user, srcID string) bool {
 	c := rs.GetConnection()
 	defer c.Close()
 
 	userSubKey := util.FormatUserSubsKey(user)
-	deleted, err := redis.Int64(c.Do("HDEL", userSubKey, srcId))
+	deleted, err := redis.Int64(c.Do("HDEL", userSubKey, srcID))
 	if err != nil {
 		// TODO: Detailed log & retry.
 		log.Printf("[e] Failed to remove subscription.\n")
@@ -77,11 +79,12 @@ func RemoveFeedSubscription(user, srcId string) bool {
 	return deleted == 1
 }
 
-func GetUnreadFeedIds(user, srcId string) []string {
+// GetUnreadFeedIds returns a list of unread feed IDs.
+func GetUnreadFeedIds(user, srcID string) []string {
 	c := rs.GetConnection()
 	defer c.Close()
 
-	unreadKey := util.FormatUserUnreadKey(user, srcId)
+	unreadKey := util.FormatUserUnreadKey(user, srcID)
 	unreadIds, err := redis.Strings(c.Do("SMEMBERS", unreadKey))
 	if err != nil {
 		// TODO: Detailed log & retry.
@@ -92,34 +95,37 @@ func GetUnreadFeedIds(user, srcId string) []string {
 	return unreadIds
 }
 
-func AppendUnreadFeedId(user, srcId, feedId string) {
+// AppendUnreadFeedItemID adds an unread feed ID to the user w.r.t. a feed source.
+func AppendUnreadFeedItemID(user, srcID, feedID string) {
 	c := rs.GetConnection()
 	defer c.Close()
 
-	unreadKey := util.FormatUserUnreadKey(user, srcId)
-	if _, err := c.Do("SADD", unreadKey, feedId); err != nil {
+	unreadKey := util.FormatUserUnreadKey(user, srcID)
+	if _, err := c.Do("SADD", unreadKey, feedID); err != nil {
 		// TODO: Detailed log & retry.
 		log.Printf("[e] Failed to add an unread feed ID.\n")
 	}
 }
 
-func RemoveUnreadFeedId(user, srcId, feedId string) {
+// RemoveUnreadFeedItemID similarly removes an unread feed ID.
+func RemoveUnreadFeedItemID(user, srcID, feedID string) {
 	c := rs.GetConnection()
 	defer c.Close()
 
-	unreadKey := util.FormatUserUnreadKey(user, srcId)
-	if _, err := c.Do("SREM", unreadKey, feedId); err != nil {
+	unreadKey := util.FormatUserUnreadKey(user, srcID)
+	if _, err := c.Do("SREM", unreadKey, feedID); err != nil {
 		// TODO: Detailed log & retry.
 		log.Printf("[e] Failed to remove an unread feed ID.\n")
 	}
 }
 
+// GetUnreadFeedCount returns the count of unread feeds of the user w.r.t. a feed source.
 // TODO: Maybe should be done when retrieving subscriptions?
-func GetUnreadFeedCount(user, srcId string) int64 {
+func GetUnreadFeedCount(user, srcID string) int64 {
 	c := rs.GetConnection()
 	defer c.Close()
 
-	unreadKey := util.FormatUserUnreadKey(user, srcId)
+	unreadKey := util.FormatUserUnreadKey(user, srcID)
 	cnt, err := redis.Int64(c.Do("SCARD", unreadKey))
 	if err != nil {
 		// TODO: Detailed log & retry.
@@ -128,12 +134,14 @@ func GetUnreadFeedCount(user, srcId string) int64 {
 	return cnt
 }
 
-func InitUserUnreadQueue(user, srcId string) {
+// InitUserUnreadQueue simply copies feed IDs from the corresponding feed source's latest
+// feed streams (which may have duplicates).
+func InitUserUnreadQueue(user, srcID string) {
 	c := rs.GetConnection()
 	defer c.Close()
 
-	unreadKey := util.FormatUserUnreadKey(user, srcId)
-	latestFeedIds := feed.GetLatestFeedIdsFromSource(srcId)
+	unreadKey := util.FormatUserUnreadKey(user, srcID)
+	latestFeedIds := feed.GetLatestItemIdsFromSource(srcID)
 
 	if _, err := c.Do("SADD", redis.Args{}.Add(unreadKey).AddFlat(latestFeedIds)...); err != nil {
 		// TODO: Detailed log & retry.

@@ -4,44 +4,42 @@ import (
 	"net/url"
 )
 
-// Key for mapping from a feed to its actual content.
-func FormatFeedKey(feedId string) string {
-	return Escape("feed:" + feedId)
+// FormatFeedKey returns key for mapping from a feed to its actual content.
+func FormatFeedKey(feedID string) string {
+	return Escape("feed:" + feedID)
 }
 
-// Key for mapping from a user to his subscribed feed sources.
+// FormatUserSubsKey returns key for mapping from a user to his subscribed feed sources.
 func FormatUserSubsKey(user string) string {
-	// TODO: Should be like 'user:1000:sub'.
 	return Escape("subs:" + user)
 }
 
-// Key for mapping from a user + a feed source to its unread feed IDs.
-func FormatUserUnreadKey(user, feedSrcId string) string {
-	// TODO: Should not allow user to have names containing ':',
-	// rather, it should be 'user:1000:src:xyt.com:unread'.
-	return Escape("unread:" + user + ":" + feedSrcId)
+// FormatUserUnreadKey returns key for mapping from a user + a feed source to its unread feed IDs.
+func FormatUserUnreadKey(user, feedSrcID string) string {
+	return Escape("unread:" + user + ":" + feedSrcID)
 }
 
-// Key for mapping from a feed source to its feed item entries.
-func FormatFeedSourceKey(rawFeedSrcId string) string {
-	return Escape("src:" + rawFeedSrcId)
+// FormatFeedSourceKey returns key for mapping from a feed source to its feed item entries.
+func FormatFeedSourceKey(rawFeedSrcID string) string {
+	return Escape("src:" + rawFeedSrcID)
 }
 
-// Key for mapping from a feed source to its latest feed IDs.
-func FormatLatestFeedsKey(feedSrcId string) string {
-	return Escape("latest:" + feedSrcId)
+// FormatLatestFeedsKey returns key for mapping from a feed source to its latest feed IDs.
+func FormatLatestFeedsKey(feedSrcID string) string {
+	return Escape("latest:" + feedSrcID)
 }
 
-// Key for mapping from a feed source to its subscribers / users.
-func FormatSubscriberKey(feedSrcId string) string {
-	return Escape("subscriber:" + feedSrcId)
+// FormatSubscriberKey returns key for mapping from a feed source to its subscribers / users.
+func FormatSubscriberKey(feedSrcID string) string {
+	return Escape("subscriber:" + feedSrcID)
 }
 
-// Key to retrieve currently listening feed sources.
+// FormatListeningKey returns key to retrieve currently listening feed sources.
 func FormatListeningKey() string {
 	return "listening"
 }
 
+// Escape simply used `QueryEscape` from `url` library.
 func Escape(s string) string {
 	return url.QueryEscape(s)
 }

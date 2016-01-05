@@ -12,13 +12,13 @@ import (
 
 // Feeder is the standard interface to handle feed subscription and retrieval.
 type Feeder interface {
-	GetFeedSource(url string) (feed.FeedSource, error)
+	GetFeedSource(url string) (feed.Source, error)
 }
 
 // Feed manager.
 type feeder struct {
 	// Mapping from atom/rss URL to corresponding info.
-	urlToFeedSrc          map[string]feed.FeedSource
+	urlToFeedSrc          map[string]feed.Source
 	urlToFeedSrcLock      *sync.Mutex
 	keywordServerEndPoint string
 }
@@ -26,7 +26,7 @@ type feeder struct {
 // NewFeeder builds the feeder and start the background goroutine.
 func NewFeeder(keywordServerEndPoint string) Feeder {
 	fd := &feeder{
-		urlToFeedSrc:          make(map[string]feed.FeedSource),
+		urlToFeedSrc:          make(map[string]feed.Source),
 		urlToFeedSrcLock:      &sync.Mutex{},
 		keywordServerEndPoint: keywordServerEndPoint,
 	}
@@ -36,7 +36,7 @@ func NewFeeder(keywordServerEndPoint string) Feeder {
 }
 
 // Requires the URL to exact match actual feed's URL.
-func (f *feeder) GetFeedSource(url string) (feed.FeedSource, error) {
+func (f *feeder) GetFeedSource(url string) (feed.Source, error) {
 	f.urlToFeedSrcLock.Lock()
 	defer f.urlToFeedSrcLock.Unlock()
 
@@ -44,7 +44,7 @@ func (f *feeder) GetFeedSource(url string) (feed.FeedSource, error) {
 		return src, nil
 	}
 
-	newSrcCh := make(chan feed.FeedSource)
+	newSrcCh := make(chan feed.Source)
 	// Buffered so the other side will not block even if the current function returns.
 	errCh := make(chan error, 1)
 	f.listen(url, newSrcCh, errCh)
@@ -52,15 +52,15 @@ func (f *feeder) GetFeedSource(url string) (feed.FeedSource, error) {
 	select {
 	case src := <-newSrcCh:
 		f.urlToFeedSrc[src.URL] = src
-		feed.AppendListeningFeedSource(src)
+		feed.AppendListeningSource(src)
 		return src, nil
 	case err := <-errCh:
-		return feed.FeedSource{}, errors.New("subscribe failed: " + err.Error())
+		return feed.Source{}, errors.New("subscribe failed: " + err.Error())
 	}
 }
 
 // When encountering a new feed source, begin listening if valid.
-func (f *feeder) listen(url string, newSrcCh chan<- feed.FeedSource, errCh chan<- error) {
+func (f *feeder) listen(url string, newSrcCh chan<- feed.Source, errCh chan<- error) {
 	// TODO: Change timeout in production. For now it's 1 min.
 	const timeout = 1
 	handler := newFeedHandler(newSrcCh, f.keywordServerEndPoint)
@@ -87,7 +87,7 @@ func (f *feeder) listen(url string, newSrcCh chan<- feed.FeedSource, errCh chan<
 // 1. Every feed item will be regarded as new to subscribed users. (Hopefully acceptable.)
 // 2. In this way, latest feeds for each source may contain duplicate items. (Also hopefully acceptable.)
 func (f *feeder) recover() {
-	listeningSrcs := feed.GetListeningFeedSources()
+	listeningSrcs := feed.GetListeningSources()
 	for _, src := range listeningSrcs {
 		f.urlToFeedSrc[src.URL] = src
 		f.listen(src.URL, nil, nil)

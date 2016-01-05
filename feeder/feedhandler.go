@@ -16,17 +16,17 @@ import (
 )
 
 type feedHandler struct {
-	newSrcCh chan<- feed.FeedSource
+	newSrcCh chan<- feed.Source
 	// Keep previous `keepSeenItemNum` feed items.
 	seenItems       []string
 	keepSeenItemNum int
 	channelID       string
 	channelURL      string
 	// Fetcher for keywords or summaries.
-	kwFetcher keyword.KeywordFetcher
+	kwFetcher keyword.Fetcher
 }
 
-func newFeedHandler(newSrcCh chan<- feed.FeedSource, keywordServerEndPoint string) *feedHandler {
+func newFeedHandler(newSrcCh chan<- feed.Source, keywordServerEndPoint string) *feedHandler {
 	return &feedHandler{
 		newSrcCh:        newSrcCh,
 		seenItems:       nil,
@@ -51,7 +51,7 @@ func (h *feedHandler) ProcessItems(rssFeed *rss.Feed, ch *rss.Channel, items []*
 	}
 
 	// Get subscribers of the current channel.
-	subscribers := feed.GetFeedSourceSubscribers(h.channelID)
+	subscribers := feed.GetSourceSubscribers(h.channelID)
 
 	// Handle items.
 	var newitems []*rss.Item
@@ -78,18 +78,18 @@ func (h *feedHandler) ProcessItems(rssFeed *rss.Feed, ch *rss.Channel, items []*
 		if len(item.Links) > 0 {
 			link = item.Links[0].Href
 		}
-		feedItem := feed.FeedItem{
+		feedItem := feed.Item{
 			Link:    link,
 			Content: *contentPtr,
 		}
-		feed.SetFeed(id, feedItem)
+		feed.SetItem(id, feedItem)
 
 		// Then append to the feed source's latest queue.
-		feed.AppendLatestFeedIdToSource(h.channelID, id)
+		feed.AppendLatestItemIDToSource(h.channelID, id)
 
 		// Then append to subscribers' unread queue.
 		for _, username := range subscribers {
-			user.AppendUnreadFeedId(username, h.channelID, id)
+			user.AppendUnreadFeedItemID(username, h.channelID, id)
 		}
 
 		// Append to its corresponding feed source by spawning a new goroutine.
@@ -97,8 +97,8 @@ func (h *feedHandler) ProcessItems(rssFeed *rss.Feed, ch *rss.Channel, items []*
 		wg.Add(1)
 		go func(id, title, pubDate string) {
 			defer wg.Done()
-			entry := feed.FeedItemEntry{
-				FeedId:  id,
+			entry := feed.ItemEntry{
+				FeedID:  id,
 				Title:   title,
 				PubDate: pubDate,
 			}
@@ -110,16 +110,16 @@ func (h *feedHandler) ProcessItems(rssFeed *rss.Feed, ch *rss.Channel, items []*
 			// 1 second timeout.
 			case <-time.After(1 * time.Second):
 			}
-			feed.AddFeedEntryToSource(h.channelID, entry)
+			feed.AddItemEntryToSource(h.channelID, entry)
 		}(id, item.Title, item.PubDate)
 	}
 	wg.Wait()
 
 	// Send back the newly established feed source if haven't done so. Then nullify the channel.
 	if h.newSrcCh != nil {
-		h.newSrcCh <- feed.FeedSource{
+		h.newSrcCh <- feed.Source{
 			URL:      rssFeed.Url,
-			SourceId: h.channelID,
+			SourceID: h.channelID,
 			Title:    ch.Title,
 		}
 		h.newSrcCh = nil

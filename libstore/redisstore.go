@@ -6,6 +6,7 @@ import (
 	"github.com/garyburd/redigo/redis"
 )
 
+// RedisStrore is the interface for underlying Redis persistence store.
 type RedisStrore interface {
 	GetConnection() redis.Conn
 }
@@ -14,7 +15,8 @@ type redisStore struct {
 	pool *redis.Pool
 }
 
-func NewStore(redisServer string) *redisStore {
+// NewStore creates a new Redis store.
+func NewStore(redisServer string) RedisStrore {
 	// Build redis connection.
 	pool := &redis.Pool{
 		MaxIdle:     3,
@@ -37,6 +39,7 @@ func NewStore(redisServer string) *redisStore {
 	}
 }
 
+// GetConnection returns a redigo connection to interact with Redis store.
 func (rs *redisStore) GetConnection() redis.Conn {
 	return rs.pool.Get()
 }

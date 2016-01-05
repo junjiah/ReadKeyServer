@@ -10,7 +10,8 @@ import (
 	"github.com/kennygrant/sanitize"
 )
 
-type KeywordFetcher interface {
+// Fetcher is the interface for keyword fetcher.
+type Fetcher interface {
 	Fetch(contentPtr *string, lang string, retry int) <-chan string
 }
 
@@ -22,17 +23,19 @@ type keywordFetcher struct {
 type summaryFetcher struct {
 }
 
-func NewKeywordFetcher(serverAddr string) *keywordFetcher {
+// NewKeywordFetcher returns a new keyword fetcher.
+func NewKeywordFetcher(serverAddr string) Fetcher {
 	return &keywordFetcher{
 		serverAddr: serverAddr,
 	}
 }
 
-func NewSummaryFetcher() *summaryFetcher {
+// NewSummaryFetcher returns a dummy summary fetcher.
+func NewSummaryFetcher() Fetcher {
 	return &summaryFetcher{}
 }
 
-// Simply retrieve a small part of the content, mostly for testing.
+// Fetch of summaryFetcher simply retrieves a small part of the content, mostly for testing.
 func (f *summaryFetcher) Fetch(contentPtr *string, lang string, retry int) <-chan string {
 	// `retry` and `lang` are redundant for summary extraction.
 	resCh := make(chan string, 1)
@@ -50,7 +53,7 @@ func (f *summaryFetcher) Fetch(contentPtr *string, lang string, retry int) <-cha
 	return resCh
 }
 
-// Fetch keywords by sending requests to the keyword server.
+// Fetch of keywordFetcher fetches keywords by sending requests to the keyword server.
 func (f *keywordFetcher) Fetch(contentPtr *string, lang string, retry int) <-chan string {
 	resCh := make(chan string, 1)
 	go func() {
@@ -69,14 +72,14 @@ func (f *keywordFetcher) Fetch(contentPtr *string, lang string, retry int) <-cha
 			defer resp.Body.Close()
 			body, _ := ioutil.ReadAll(resp.Body)
 
-			var respJson struct {
-				Keywords []string `json: "keywords"`
+			var respJSON struct {
+				Keywords []string `json:"keywords"`
 			}
 
-			if err := json.Unmarshal(body, &respJson); err != nil {
+			if err := json.Unmarshal(body, &respJSON); err != nil {
 				// TODO: Ignore if parsing json fails.
 			} else {
-				resCh <- strings.Join(respJson.Keywords, ",")
+				resCh <- strings.Join(respJSON.Keywords, ",")
 			}
 
 			// Exit the loop when successful.
