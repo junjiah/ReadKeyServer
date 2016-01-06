@@ -3,7 +3,9 @@ package feeder
 import (
 	"crypto/sha1"
 	"fmt"
+	"html"
 	"log"
+	"regexp"
 	"sync"
 	"time"
 
@@ -14,6 +16,9 @@ import (
 
 	rss "github.com/jteeuwen/go-pkg-rss"
 )
+
+// A utility regular expression pattern to find RSS feed content using RSS1.0 Content Module Specification.
+var contentRe = regexp.MustCompile("^<[^>]*http://purl.org/rss/1.0/modules/content[^>]*>(.*)<[^>]*http://purl.org/rss/1.0/modules/content[^>]*>$")
 
 type feedHandler struct {
 	newSrcCh chan<- feed.Source
@@ -146,10 +151,15 @@ func getChannelID(key string) string {
 
 func getItemContent(i *rss.Item) *string {
 	if i.Content != nil {
-		// For atom.
+		if match := contentRe.FindStringSubmatch(i.Content.Text); match != nil {
+			// The feed uses RSS1.0 content modules, needs HTML unescape.
+			// Ref: https://github.com/jteeuwen/go-pkg-rss/blob/31df4852b3d06032f59342013e6362526be0cd72/rss.go#L199
+			unescaped := html.UnescapeString(match[1])
+			return &unescaped
+		}
 		return &i.Content.Text
 	}
-	// For rss.
+	// Fallback. For normal RSS.
 	return &i.Description
 }
 
