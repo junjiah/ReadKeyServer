@@ -81,6 +81,10 @@ func GetItemEntriesFromSource(srcID string, feedIDs []string) []ItemEntry {
 	c := rs.GetConnection()
 	defer c.Close()
 
+	if len(feedIDs) == 0 {
+		return nil
+	}
+
 	entries, err := redis.Strings(c.Do("HMGET", redis.Args{}.Add(srcID).AddFlat(feedIDs)...))
 	if err != nil {
 		// TODO: Detailed log & retry.

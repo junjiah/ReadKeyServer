@@ -154,7 +154,7 @@ func main() {
 		})
 
 		// Retrieve a specific subscription / feed source, if successful return the list of format
-		// { feeds: [{ id, title, summary }] }.
+		// { feeds: [{ id, keywords, pubDate, title }] }.
 		authorized.GET("subscription/*id", func(c *gin.Context) {
 			c.Writer.WriteHeader(400)
 			username := sessions.Default(c).Get("userid").(string)
@@ -188,14 +188,20 @@ func main() {
 		authorized.PUT("subscription/*id", func(c *gin.Context) {
 			username := sessions.Default(c).Get("userid").(string)
 			var form struct {
-				ItemID string `form:"itemId" binding:"required"`
-				Read   bool   `form:"read" binding:"required"`
+				ItemID  string `form:"itemId"`
+				Read    bool   `form:"read"`
+				MarkAll bool   `form:"markAll"`
 			}
 
 			if c.Bind(&form) == nil {
 				srcID := util.Escape(c.Param("id")[1:])
-				feedID := util.Escape(form.ItemID)
-				user.RemoveUnreadFeedItemID(username, srcID, feedID)
+				if form.MarkAll {
+					user.RemoveAllUnreadFeedItem(username, srcID)
+				} else {
+					// Mark specific feed item.
+					feedID := util.Escape(form.ItemID)
+					user.RemoveUnreadFeedItemID(username, srcID, feedID)
+				}
 				c.Writer.WriteHeader(204)
 			}
 		})

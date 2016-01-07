@@ -119,6 +119,18 @@ func RemoveUnreadFeedItemID(user, srcID, feedID string) {
 	}
 }
 
+// RemoveAllUnreadFeedItem removes all unread feeds.
+func RemoveAllUnreadFeedItem(user, srcID string) {
+	c := rs.GetConnection()
+	defer c.Close()
+
+	unreadKey := util.FormatUserUnreadKey(user, srcID)
+	if _, err := c.Do("DEL", unreadKey); err != nil {
+		// TODO: Detailed log & retry.
+		log.Printf("[e] Failed to remove all unread feeds.\n")
+	}
+}
+
 // GetUnreadFeedCount returns the count of unread feeds of the user w.r.t. a feed source.
 // TODO: Maybe should be done when retrieving subscriptions?
 func GetUnreadFeedCount(user, srcID string) int64 {
